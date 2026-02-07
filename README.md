@@ -1,63 +1,82 @@
-Основные функции:
-1. Чтение ошибки по ID
+Основные возможности
+--------------------
 
-// Просто передайте ID ошибки
-LogReader.Read("ID_ВАШЕЙ_ОШИБКИ");
+### 1\. Чтение ошибки по ID
 
-2. Проверка существования ошибки
-// Вернет true, если ошибка есть в файле
-bool exists = LogReader.ErrorExists("ID_ВАШЕЙ_ОШИБКИ");
+LogReader.Read("ERROR\_001");
 
-3. Получение ошибок по уровню важности
-// Получите все ошибки определенного уровня
-var errors = LogReader.GetErrorsByLevel("ERROR"); // "ERROR", "WARNING" или "INFO"
+### 2\. Проверка существования ошибки
 
-// Можно использовать так:
+bool exists \= LogReader.ErrorExists("ERROR\_001");
+
+### 3\. Получение ошибок по уровню
+
+// Получить все ошибки уровня ERROR
+var errors \= LogReader.GetErrorsByLevel("ERROR");
+
+// Использовать полученные ошибки
 foreach (var error in errors)
 {
-    Debug.Log($"Ошибка: {error.ID}, Сообщение: {error.UnityMessage}");
+    Debug.Log($"ID: {error.ID}, Сообщение: {error.UnityMessage}");
 }
 
-4. Получение общего количества ошибок
-// Узнайте сколько всего ошибок в файле
-int totalErrors = LogReader.GetTotalErrorCount();
+### 4\. Получение общего количества ошибок
+
+int totalErrors \= LogReader.GetTotalErrorCount();
+
+Требования к файлу ошибок
+-------------------------
+
+1.  **Расположение файла**: `Assets/Error/ErrorLog.xml`
+    
+2.  **Формат XML**:
+    
 
 
-Структура XML файла (ErrorLog.xml):
-Файл должен быть в папке: Assets/Error/ErrorLog.xml
+<Errors\>
+  <Error\>
+    <ID\>ERROR\_001</ID\>
+    <Category\>Графика</Category\>
+    <Type\>Шейдер</Type\>
+    <Level\>ERROR</Level\>
+    <UnityMessage\>Шейдер не найден</UnityMessage\>
+    <SuggestedFix\>Проверьте наличие шейдера в проекте</SuggestedFix\>
+    <AdditionalInfo\>Дополнительная информация</AdditionalInfo\>
+  </Error\>
+</Errors\>
 
-Пример содержимого:
-<Errors>
-  <Error>
-    <ID>001</ID>
-    <Category>Графика</Category>
-    <Type>Shader</Type>
-    <Level>ERROR</Level>
-    <UnityMessage>Шейдер не найден</UnityMessage>
-    <SuggestedFix>Проверьте наличие шейдера в проекте</SuggestedFix>
-  </Error>
-</Errors>
+Уровни важности (Level)
+-----------------------
 
+*   **ERROR** - Критические ошибки (красный текст в консоли)
+    
+*   **WARNING** - Предупреждения (желтый текст в консоли)
+    
+*   **INFO** - Информационные сообщения (белый текст в консоли)
+    
 
-Уровни важности:
-ERROR - Критическая ошибка (красный текст в консоли)
-WARNING - Предупреждение (желтый текст в консоли)
-INFO - Информация (белый текст в консоли)
+Пример использования
+--------------------
 
+    void Start()
+    {
+        // Пример 1: Проверка и чтение ошибки
+        string errorId \= "MISSING\_TEXTURE";
+        
+        if (LogReader.ErrorExists(errorId))
+        {
+            LogReader.Read(errorId);
+        }
+        else
+        {
+            Debug.LogWarning($"Ошибка {errorId} не найдена");
+        }
 
-Пример использования:
-// 1. Проверяем есть ли ошибка
-if (LogReader.ErrorExists("MISSING_TEXTURE"))
-{
-    // 2. Читаем информацию об ошибке
-    LogReader.Read("MISSING_TEXTURE");
-}
-// 3. Получаем все предупреждения
-var warnings = LogReader.GetErrorsByLevel("WARNING");
+        // Пример 2: Получение всех предупреждений
+        var warnings \= LogReader.GetErrorsByLevel("WARNING");
+        Debug.Log($"Найдено предупреждений: {warnings.Count}");
 
-
-
-Важно:
-Файл XML кэшируется на 30 секунд
-При изменении файла кэш обновится автоматически
-Если файл не найден, вы увидите ошибку в консоли
+        // Пример 3: Общая статистика
+        int total \= LogReader.GetTotalErrorCount();
+        Debug.Log($"Всего ошибок в базе: {total}");
+    }
