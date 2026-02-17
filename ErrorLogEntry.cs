@@ -1,195 +1,271 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Xml;
 using System.Xml.Linq;
-using UnityEditor.PackageManager;
 using UnityEngine;
 
-public class LogReader
+[CreateAssetMenu(fileName = "Errors Helper", menuName = "Errors Reader")]
+public class LogReader : ScriptableObject
 {
-    private static string xmlPath = Path.Combine(Application.dataPath, "Error/ErrorLog.xml");
-    private static XDocument _cachedDoc;
-    private static DateTime _lastCacheTime;
-    private static readonly TimeSpan CacheDuration = TimeSpan.FromSeconds(30);
+    [Header("Настройки файла с ошибками")]
+    [Tooltip("XML файл с описанием ошибок")]
+    public TextAsset errorsXmlFile;
 
-    public static void Read(string id)
+    /// <summary>
+    /// Получает информацию об ошибке по ID
+    /// </summary>
+    public ErrorInfo GetError(string id)
     {
+        if (errorsXmlFile == null)
+        {
+            Debug.LogError($"Errors Helper: файл с ошибками не выбран! ({name})");
+            return null;
+        }
+
         try
         {
-            XDocument doc = GetCachedDocument();
-
-            var errorElement = doc.Descendants("Error")
-                     .FirstOrDefault(x => x.Element("ID")?.Value == id);
-
-            if (errorElement != null)
+            using (StringReader stringReader = new StringReader(errorsXmlFile.text))
+            using (XmlReader reader = XmlReader.Create(stringReader))
             {
-                ProcessErrorElement(id, errorElement);
+                while (reader.Read())
+                {
+                    if (reader.NodeType == XmlNodeType.Element && reader.Name == "Error")
+                    {
+                        using (XmlReader subtree = reader.ReadSubtree())
+                        {
+                            var element = XElement.Load(subtree);
+                            string errorId = element.Element("ID")?.Value;
+
+                            if (errorId == id)
+                            {
+                                return new ErrorInfo
+                                {
+                                    ID = errorId,
+                                    Category = element.Element("Category")?.Value,
+                                    Type = element.Element("Type")?.Value,
+                                    Level = element.Element("Level")?.Value,
+                                    UnityMessage = element.Element("UnityMessage")?.Value,
+                                    SuggestedFix = element.Element("SuggestedFix")?.Value,
+                                    AdditionalInfo = element.Element("AdditionalInfo")?.Value
+                                };
+                            }
+                        }
+                    }
+                }
             }
-            else
-            {
-                Debug.LogWarning($"Ошибка с ID '{id}' не найдена");
-            }
-        }
-        catch (FileNotFoundException)
-        {
-            Debug.LogError($"Файл не найден: {xmlPath}");
-        }
-        catch (XmlException xmlEx)
-        {
-            Debug.LogError($"Ошибка формата XML: {xmlEx.Message}");
+
+            Debug.LogWarning($"Errors Helper: ошибка с ID '{id}' не найдена");
+            return null;
         }
         catch (Exception e)
         {
-            Debug.LogError($"Ошибка чтения XML: {e.Message}");
+            Debug.LogError($"Ошибка при чтении Errors Helper: {e.Message}");
+            return null;
         }
     }
+
     /// <summary>
-    /// получение всех данных о сообшении по его id
+    /// Получает все ошибки определенного уровня
     /// </summary>
-    /// <param name="id"></param>
-    /// <param name="errorElement"></param>
-    private static void ProcessErrorElement(string id, XElement errorElement)
+    public List<ErrorInfo> GetErrorsByLevel(string level)
     {
-        string category = errorElement.Element("Category")?.Value ?? "Category не найдено";
-        string type = errorElement.Element("Type")?.Value ?? "Type не найден";
-        string level = errorElement.Element("Level")?.Value ?? "Level не найден";
-        string unityMessage = errorElement.Element("UnityMessage")?.Value ?? "UnityMessage не найден";
-        string suggestedFix = errorElement.Element("SuggestedFix")?.Value ?? "SuggestedFix не найден";
-        string additionalInfo = errorElement.Element("AdditionalInfo")?.Value ?? string.Empty;
+        var result = new List<ErrorInfo>();
 
-        string logMessage = FormatLogMessage(id, level, category, type, unityMessage, suggestedFix, additionalInfo);
-
-        LogByLevel(level, logMessage);
-    }
-    /// <summary>
-    /// формирование сообшения
-    /// </summary>
-    /// <param name="id"></param>
-    /// <param name="level"></param>
-    /// <param name="category"></param>
-    /// <param name="type"></param>
-    /// <param name="unityMessage"></param>
-    /// <param name="suggestedFix"></param>
-    /// <param name="additionalInfo"></param>
-    /// <returns>готовое к отправке сообшение</returns>
-    private static string FormatLogMessage(string id, string level, string category, string type,
-                                          string unityMessage, string suggestedFix, string additionalInfo)
-    {
-        var message = $"[{level}] ID: {id}\n" +
-                     $"Категория: {category}\n" +
-                     $"Тип: {type}\n" +
-                     $"Сообщение: {unityMessage}\n" +
-                     $"Решение: {suggestedFix}\n";
-
-        if (!string.IsNullOrEmpty(additionalInfo))
+        if (errorsXmlFile == null)
         {
-            message += $"Доп. информация: {additionalInfo}\n";
+            Debug.LogError($"Errors Helper: файл с ошибками не выбран! ({name})");
+            return result;
         }
 
-        return message;
-    }
-    /// <summary>
-    /// логирование с учетом уровня важности сообщения
-    /// </summary>
-    /// <param name="level"></param>
-    /// <param name="message"></param>
-    private static void LogByLevel(string level, string message)
-    {
-        switch (level.ToUpper())
-        {
-            case "ERROR":
-                Debug.LogError(message);
-                break;
-            case "WARNING":
-                Debug.LogWarning(message);
-                break;
-            case "INFO":
-            default:
-                Debug.Log(message);
-                break;
-        }
-    }
-    /// <summary>
-    /// кэширование XML-документа для оптимизации производительности
-    /// </summary>
-    /// <returns></returns>
-    private static XDocument GetCachedDocument()
-    {
-        var lastWriteTime = File.GetLastWriteTime(xmlPath);
-
-        if (_cachedDoc == null || DateTime.Now - _lastCacheTime > CacheDuration || lastWriteTime > _lastCacheTime)
-        {
-            _cachedDoc = XDocument.Load(xmlPath);
-            _lastCacheTime = DateTime.Now;
-        }
-        return _cachedDoc;
-    }
-    /// <summary>
-    /// получение всех ошибок определенного уровня
-    /// </summary>
-    /// <param name="level"></param>
-    /// <returns>уровень(ERROR, WARNING, INFO) ошибки </returns>
-    public static List<ErrorInfo> GetErrorsByLevel(string level)
-    {
         try
         {
-            var doc = GetCachedDocument();
-            return doc.Descendants("Error")
-                     .Where(x => x.Element("Level")?.Value?.Equals(level, StringComparison.OrdinalIgnoreCase) == true)
-                     .Select(e => new ErrorInfo
-                     {
-                         ID = e.Element("ID")?.Value,
-                         Category = e.Element("Category")?.Value,
-                         Type = e.Element("Type")?.Value,
-                         Level = e.Element("Level")?.Value,
-                         UnityMessage = e.Element("UnityMessage")?.Value,
-                         SuggestedFix = e.Element("SuggestedFix")?.Value
-                     })
-                     .ToList();
+            using (StringReader stringReader = new StringReader(errorsXmlFile.text))
+            using (XmlReader reader = XmlReader.Create(stringReader))
+            {
+                while (reader.Read())
+                {
+                    if (reader.NodeType == XmlNodeType.Element && reader.Name == "Error")
+                    {
+                        using (XmlReader subtree = reader.ReadSubtree())
+                        {
+                            var element = XElement.Load(subtree);
+                            string errorLevel = element.Element("Level")?.Value;
+
+                            if (string.Equals(errorLevel, level, StringComparison.OrdinalIgnoreCase))
+                            {
+                                result.Add(new ErrorInfo
+                                {
+                                    ID = element.Element("ID")?.Value,
+                                    Category = element.Element("Category")?.Value,
+                                    Type = element.Element("Type")?.Value,
+                                    Level = errorLevel,
+                                    UnityMessage = element.Element("UnityMessage")?.Value,
+                                    SuggestedFix = element.Element("SuggestedFix")?.Value,
+                                    AdditionalInfo = element.Element("AdditionalInfo")?.Value
+                                });
+                            }
+                        }
+                    }
+                }
+            }
         }
         catch (Exception e)
         {
-            Debug.LogError($"Ошибка получения ошибок по уровню: {e.Message}");
-            return new List<ErrorInfo>();
+            Debug.LogError($"Ошибка при чтении Errors Helper: {e.Message}");
         }
+
+        return result;
     }
+
     /// <summary>
-    /// проверка существования ошибки
+    /// Проверяет существование ошибки
     /// </summary>
-    /// <param name="id"></param>
-    /// <returns>true - в файле сушествует такая ошибка, false - не сушествует</returns>
-    public static bool ErrorExists(string id)
+    public bool HasError(string id)
     {
+        if (errorsXmlFile == null) return false;
+
         try
         {
-            var doc = GetCachedDocument();
-            return doc.Descendants("Error")
-                     .Any(x => x.Element("ID")?.Value == id);
+            using (StringReader stringReader = new StringReader(errorsXmlFile.text))
+            using (XmlReader reader = XmlReader.Create(stringReader))
+            {
+                while (reader.Read())
+                {
+                    if (reader.NodeType == XmlNodeType.Element && reader.Name == "Error")
+                    {
+                        using (XmlReader subtree = reader.ReadSubtree())
+                        {
+                            var element = XElement.Load(subtree);
+                            if (element.Element("ID")?.Value == id)
+                                return true;
+                        }
+                    }
+                }
+            }
         }
         catch
         {
             return false;
         }
+
+        return false;
     }
+
     /// <summary>
-    /// получение общего количества ошибок
+    /// Получает общее количество ошибок
     /// </summary>
-    /// <returns>количество ошибок всего в файле</returns>
-    public static int GetTotalErrorCount()
+    public int TotalErrorsCount
     {
-        try
+        get
         {
-            var doc = GetCachedDocument();
-            return doc.Descendants("Error").Count();
-        }
-        catch
-        {
-            return 0;
+            if (errorsXmlFile == null) return 0;
+            int count = 0;
+
+            try
+            {
+                using (StringReader stringReader = new StringReader(errorsXmlFile.text))
+                using (XmlReader reader = XmlReader.Create(stringReader))
+                {
+                    while (reader.Read())
+                    {
+                        if (reader.NodeType == XmlNodeType.Element && reader.Name == "Error")
+                        {
+                            count++;
+                            reader.Skip(); // Пропускаем содержимое для скорости
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                return 0;
+            }
+
+            return count;
         }
     }
 
+    /// <summary>
+    /// Получает все уникальные уровни ошибок
+    /// </summary>
+    public List<string> GetAllLevels()
+    {
+        var levels = new HashSet<string>();
+
+        if (errorsXmlFile == null) return new List<string>();
+
+        try
+        {
+            using (StringReader stringReader = new StringReader(errorsXmlFile.text))
+            using (XmlReader reader = XmlReader.Create(stringReader))
+            {
+                while (reader.Read())
+                {
+                    if (reader.NodeType == XmlNodeType.Element && reader.Name == "Error")
+                    {
+                        using (XmlReader subtree = reader.ReadSubtree())
+                        {
+                            var element = XElement.Load(subtree);
+                            string level = element.Element("Level")?.Value;
+                            if (!string.IsNullOrEmpty(level))
+                            {
+                                levels.Add(level);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"Ошибка при чтении Errors Helper: {e.Message}");
+        }
+
+        return new List<string>(levels);
+    }
+
+    /// <summary>
+    /// Выводит ошибку в консоль
+    /// </summary>
+    public void LogError(string id)
+    {
+        var error = GetError(id);
+        if (error != null)
+        {
+            string message = FormatLogMessage(error);
+            switch (error.Level?.ToUpper())
+            {
+                case "ERROR":
+                    Debug.LogError(message);
+                    break;
+                case "WARNING":
+                    Debug.LogWarning(message);
+                    break;
+                default:
+                    Debug.Log(message);
+                    break;
+            }
+        }
+    }
+
+    private string FormatLogMessage(ErrorInfo error)
+    {
+        var message = $"[{error.Level}] ID: {error.ID}\n" +
+                     $"Категория: {error.Category}\n" +
+                     $"Тип: {error.Type}\n" +
+                     $"Сообщение: {error.UnityMessage}\n" +
+                     $"Решение: {error.SuggestedFix}";
+
+        if (!string.IsNullOrEmpty(error.AdditionalInfo))
+        {
+            message += $"\nДоп. информация: {error.AdditionalInfo}";
+        }
+
+        return message;
+    }
+
+    [Serializable]
     public class ErrorInfo
     {
         public string ID { get; set; }
@@ -198,7 +274,11 @@ public class LogReader
         public string Level { get; set; }
         public string UnityMessage { get; set; }
         public string SuggestedFix { get; set; }
+        public string AdditionalInfo { get; set; }
+
+        public override string ToString()
+        {
+            return $"[{Level}] {ID}: {UnityMessage}";
+        }
     }
 }
-
-
